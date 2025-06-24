@@ -4,10 +4,9 @@
 $file = $_GET[ 'page' ];
 
 // Input validation
-if( !fnmatch( "file*", $file ) && $file != "include.php" ) {
+if( !in_array($file, ['allowedfile1.php', 'allowedfile2.php'])) {
 	// This isn't the page we want!
-	echo "ERROR: File not found!";
-	exit;
+	die('Access Denied')
 }
 
 ?>

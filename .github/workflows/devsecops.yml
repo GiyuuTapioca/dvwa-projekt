@@ -109,6 +109,10 @@ jobs:
     needs: [build, trivy]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Build Image
+        run: docker build -t dvwa .
+        
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
