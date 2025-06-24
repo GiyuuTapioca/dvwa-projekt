@@ -1,0 +1,117 @@
+name: DevSecOps CI/CD
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t dvwa:latest .
+
+  sca:
+    name: Dependency Scan (SCA)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pip-audit
+        run: |
+          pip install pip-audit
+          pip audit > sca-report.txt || true
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: sca-report
+          path: sca-report.txt
+
+  sast:
+    name: Static Code Analysis (SAST)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Semgrep
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/src returntocorp/semgrep semgrep --config=auto --json > semgrep-output.json
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report
+          path: semgrep-output.json
+
+  secrets:
+    name: Secrets Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run GitLeaks
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          args: detect --source=. --report-format=json --report-path=gitleaks-report.json
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
+
+  dast:
+    name: DAST with OWASP ZAP
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start DVWA container
+        run: docker run -d -p 3000:80 --name dvwa dvwa:latest
+      - name: Wait for app
+        run: sleep 15
+      - name: Run OWASP ZAP Baseline scan
+        run: |
+          docker run -t owasp/zap2docker-stable zap-baseline.py -t http://host.docker.internal:3000 -r zap-report.html || true
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: zap-report.html
+
+  trivy:
+    name: Docker Image Scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: dvwa:latest
+          format: "table"
+          exit-code: 0
+          ignore-unfixed: true
+          severity: "HIGH,CRITICAL"
+          output: trivy-report.txt
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report
+          path: trivy-report.txt
+
+  release:
+    name: Push to docker hub
+    runs-on: ubuntu-latest
+    needs: [build, trivy]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push image to docker hub
+        run: |
+          docker tag dvwa:latest ${{ secrets.DOCKERHUB_USERNAME }}/dvwa:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/dvwa:latest
