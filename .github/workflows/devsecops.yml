@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build DVWA image from Dockerfile
-        run: docker build -t dvwa:latest .
+        run: docker build -t dvwa .
 
   sca:
     name: Dependency Scan (SCA)
@@ -57,39 +57,35 @@ jobs:
           path: gitleaks-report.json
 
   dast:
-    name: DAST with OWASP ZAP
+    name: DAST Scan with NIKTO
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Build and run DVWA container
         run: |
-          docker build -t dvwa:latest .
-          docker network create zapnet
-          docker run -d --rm --name dvwa --network zapnet -p 3000:80 dvwa:latest
+          docker build -t dvwa .
+          docker run -d --rm --name dvwa -p 3000:80 dvwa
           echo "Waiting for DVWA to be available..."
           until curl -s http://localhost:3000 > /dev/null; do
-            echo "Still waiting for DVWA..."
+            echo "waiting for DVWA..."
             sleep 5
           done
 
-      - name: Create zap-output directory
-        run: mkdir -p zap-output
-
-      - name: Run ZAP Full Scan
+      - name: Nikto Scan
         run: |
-          docker run --rm \
-            --network zapnet \
-            -v ${{ github.workspace }}/zap-output:/zap/wrk \
-            kondukto/zap2docker-stable zap-full-scan.py \
-            -t http://dvwa:80 \
-            -J /zap/wrk/zap-cli-output.json \
-            -r /zap/wrk/zap-report.html || true
+          sudo apt-get update
+          sudo apt-get install -y nikto
+          nikto -h http://localhost:3000 -o nikto-report.txt -Format txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: peter-evans/create-issue-from-file@v4
         with:
-          name: zap-report
-          path: zap-output/
+          title: Nikto DAST Report
+          content-filepath: nikto-report.txt
+          labels: security, nikto
+      
+      - name: Stop container
+        run: docker stop dvwa
 
   trivy:
     name: Docker Image Scan (Trivy)
@@ -99,7 +95,7 @@ jobs:
       - name: Scan Docker image with Trivy
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            aquasec/trivy image --exit-code 1 --severity HIGH,CRITICAL --format table dvwa:latest > trivy-report.txt || true
+            aquasec/trivy image --exit-code 1 --severity HIGH,CRITICAL --format table dvwa > trivy-report.txt || true
       - uses: actions/upload-artifact@v4
         with:
           name: trivy-report
