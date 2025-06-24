@@ -16,6 +16,7 @@ RUN apt-get update \
  # Use pdo_sqlite instead of pdo_mysql if you want to use sqlite
  && docker-php-ext-install gd mysqli pdo pdo_mysql
 
+COPY requirements.txt .
 COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
 COPY --chown=www-data:www-data . .
 COPY --chown=www-data:www-data config/config.inc.php.dist config/config.inc.php
@@ -23,3 +24,5 @@ COPY --chown=www-data:www-data config/config.inc.php.dist config/config.inc.php
 # This is configuring the stuff for the API
 RUN cd /var/www/html/vulnerabilities/api \
  && composer install \
+RUN pip install --upgrade \
+ && pip install -r requirements.txt
