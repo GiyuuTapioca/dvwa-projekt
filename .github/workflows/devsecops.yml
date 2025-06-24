@@ -24,11 +24,11 @@ jobs:
       - name: Run pip-audit
         run: |
           pip install pip-audit
-          pip-audit > sca-report.txt || true
+          pip-audit --format json --output sca-report.json || true
       - uses: actions/upload-artifact@v4
         with:
           name: sca-report
-          path: sca-report.txt
+          path: sca-report.json
 
   sast:
     name: Static Code Analysis (SAST)
@@ -99,7 +99,7 @@ jobs:
       - name: Scan Docker image with Trivy
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            aquasec/trivy image --exit-code 0 --severity HIGH,CRITICAL dvwa:latest > trivy-report.txt || true
+            aquasec/trivy image --exit-code 1 --severity HIGH,CRITICAL --format table dvwa:latest > trivy-report.txt || true
       - uses: actions/upload-artifact@v4
         with:
           name: trivy-report
