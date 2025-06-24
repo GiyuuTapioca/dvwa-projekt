@@ -78,11 +78,11 @@ jobs:
           sudo apt-get install -y nikto
           nikto -h http://localhost:3000 -o nikto-report.txt -Format txt
 
-      - uses: peter-evans/create-issue-from-file@v4
+      - name: Upload Nikto report
+        uses: actions/upload-artifact@v4
         with:
-          title: Nikto DAST Report
-          content-filepath: nikto-report.txt
-          labels: security, nikto
+          name: nikto-report
+          path: nikto-report.txt
       
       - name: Stop container
         run: docker stop dvwa
