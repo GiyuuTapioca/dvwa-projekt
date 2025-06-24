@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -13,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build Docker image
+      - name: Build DVWA image
         run: docker build -t dvwa:latest .
 
   sca:
@@ -25,7 +26,7 @@ jobs:
         run: |
           pip install pip-audit
           pip-audit > sca-report.txt || true
-      - name: Upload report
+      - name: Upload SCA report
         uses: actions/upload-artifact@v4
         with:
           name: sca-report
@@ -39,7 +40,7 @@ jobs:
       - name: Run Semgrep
         run: |
           docker run --rm -v ${{ github.workspace }}:/src returntocorp/semgrep semgrep --config=auto --json > semgrep-output.json
-      - name: Upload report
+      - name: Upload Semgrep report
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-report
@@ -50,11 +51,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run GitLeaks
-        uses: gitleaks/gitleaks-action@v2
-        with:
-          args: detect --source=. --report-format=json --report-path=gitleaks-report.json
-      - name: Upload report
+      - name: Run GitLeaks via Docker
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/path zricethezav/gitleaks:latest detect --source=/path --report-format=json --report-path=/path/gitleaks-report.json || true
+      - name: Upload GitLeaks report
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
@@ -65,14 +65,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Start DVWA container
-        run: docker run -d -p 3000:80 --name dvwa dvwa:latest
-      - name: Wait for app
-        run: sleep 15
-      - name: Run OWASP ZAP Baseline Scan
         run: |
-          docker run -t owasp/zap2docker-stable zap-baseline.py -t http://host.docker.internal:3000 -r zap-report.html || true
-      - name: Upload report
+          docker network create zapnet
+          docker run -d --rm --name dvwa --network zapnet -p 3000:80 dvwa:latest
+          sleep 15
+
+      - name: Run OWASP ZAP scan
+        run: |
+          docker run --rm --network zapnet -v ${{ github.workspace }}:/zap/wrk owasp/zap2docker-stable zap-baseline.py -t http://dvwa:80 -r zap-report.html || true
+
+      - name: Upload ZAP report
         uses: actions/upload-artifact@v4
         with:
           name: zap-report
@@ -83,16 +87,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: dvwa:latest
-          format: 'table'
-          exit-code: 0
-          ignore-unfixed: true
-          severity: 'HIGH,CRITICAL'
-          output: trivy-report.txt
-      - name: Upload report
+      - name: Scan Docker image with Trivy
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/root aquasec/trivy image --exit-code 0 --severity HIGH,CRITICAL dvwa:latest > trivy-report.txt || true
+      - name: Upload Trivy report
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
@@ -111,7 +109,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Push image to Docker Hub
+      - name: Push Docker image
         run: |
           docker tag dvwa:latest ${{ secrets.DOCKERHUB_USERNAME }}/dvwa:latest
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/dvwa:latest
