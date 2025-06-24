@@ -13,8 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Build DVWA image
+      - name: Build DVWA image from Dockerfile
         run: docker build -t dvwa:latest .
 
   sca:
@@ -22,12 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install pip-audit
+      - name: Run pip-audit
         run: |
           pip install pip-audit
           pip-audit > sca-report.txt || true
-      - name: Upload SCA report
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: sca-report
           path: sca-report.txt
@@ -40,8 +38,7 @@ jobs:
       - name: Run Semgrep
         run: |
           docker run --rm -v ${{ github.workspace }}:/src returntocorp/semgrep semgrep --config=auto --json > semgrep-output.json
-      - name: Upload Semgrep report
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: semgrep-report
           path: semgrep-output.json
@@ -51,11 +48,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run GitLeaks via Docker
+      - name: Run GitLeaks
         run: |
-          docker run --rm -v ${{ github.workspace }}:/path zricethezav/gitleaks:latest detect --source=/path --report-format=json --report-path=/path/gitleaks-report.json || true
-      - name: Upload GitLeaks report
-        uses: actions/upload-artifact@v4
+          docker run --rm -v ${{ github.workspace }}:/repo zricethezav/gitleaks detect --source=/repo --report-format=json --report-path=/repo/gitleaks-report.json || true
+      - uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
           path: gitleaks-report.json
@@ -66,21 +62,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Start DVWA container
+      - name: Build and run DVWA container
         run: |
+          docker build -t dvwa:latest .
           docker network create zapnet
           docker run -d --rm --name dvwa --network zapnet -p 3000:80 dvwa:latest
-          sleep 15
+          echo "Waiting for DVWA to be available..."
+          until curl -s http://localhost:3000 > /dev/null; do
+            echo "Still waiting for DVWA..."
+            sleep 5
+          done
 
-      - name: Run ZAP Baseline Scan
+      - name: Run ZAP Full Scan
         run: |
-          docker run --rm --network zapnet -v ${{ github.workspace }}:/zap/wrk kondukto/zap2docker-stable zap-baseline.py -t http://dvwa:80 -r zap-report.html || true
+          docker run --rm \
+            --network zapnet \
+            -v ${{ github.workspace }}:/zap/wrk \
+            kondukto/zap2docker-stable zap-full-scan.py \
+            -t http://dvwa:80 \
+            -J zap-cli-output.json \
+            -r zap-report.html || true
 
-      - name: Upload ZAP report
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: zap-report
-          path: zap-report.html
+          path: |
+            zap-report.html
+            zap-cli-output.json
 
   trivy:
     name: Docker Image Scan (Trivy)
@@ -89,9 +97,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Scan Docker image with Trivy
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/root aquasec/trivy image --exit-code 0 --severity HIGH,CRITICAL dvwa:latest > trivy-report.txt || true
-      - name: Upload Trivy report
-        uses: actions/upload-artifact@v4
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy image --exit-code 0 --severity HIGH,CRITICAL dvwa:latest > trivy-report.txt || true
+      - uses: actions/upload-artifact@v4
         with:
           name: trivy-report
           path: trivy-report.txt
@@ -102,14 +110,13 @@ jobs:
     needs: [build, trivy]
     steps:
       - uses: actions/checkout@v4
-
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Push Docker image
+      - name: Push Docker image to Docker Hub
         run: |
           docker tag dvwa:latest ${{ secrets.DOCKERHUB_USERNAME }}/dvwa:latest
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/dvwa:latest
