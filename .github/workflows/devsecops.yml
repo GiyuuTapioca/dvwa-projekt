@@ -72,9 +72,9 @@ jobs:
           docker run -d --rm --name dvwa --network zapnet -p 3000:80 dvwa:latest
           sleep 15
 
-      - name: Run OWASP ZAP scan
+      - name: Run ZAP Baseline Scan
         run: |
-          docker run --rm --network zapnet -v ${{ github.workspace }}:/zap/wrk owasp/zap2docker-stable zap-baseline.py -t http://dvwa:80 -r zap-report.html || true
+          docker run --rm --network zapnet -v ${{ github.workspace }}:/zap/wrk kondukto/zap2docker-stable zap-baseline.py -t http://dvwa:80 -r zap-report.html || true
 
       - name: Upload ZAP report
         uses: actions/upload-artifact@v4
