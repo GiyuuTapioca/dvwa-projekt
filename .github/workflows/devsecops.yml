@@ -91,6 +91,7 @@ jobs:
   trivy:
     name: Docker Image Scan (Trivy)
     runs-on: ubuntu-latest
+    needs: [build]
     steps:
       - uses: actions/checkout@v4
       - name: Scan Docker image with Trivy
